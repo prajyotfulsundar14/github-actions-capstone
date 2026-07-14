@@ -63,8 +63,6 @@ jobs:
 
     needs: docker
 
-    if: needs.docker.outputs.pushed == 'true' && needs.docker.outputs.image_url != ''
-
     runs-on: ubuntu-latest
 
     steps:
@@ -72,17 +70,10 @@ jobs:
         run: |
           echo "Image URL = '${{ needs.docker.outputs.image_url }}'"
 
-      - name: Skip Trivy scan if image URL is missing
-        if: ${{ needs.docker.outputs.image_url == '' }}
-        run: |
-          echo "No image URL available; skipping Trivy scan."
-
       - name: Checkout Repository
-        if: ${{ needs.docker.outputs.image_url != '' }}
         uses: actions/checkout@v4
 
       - name: Install Trivy
-        if: ${{ needs.docker.outputs.image_url != '' }}
         shell: bash
         run: |
           sudo apt-get update
@@ -95,6 +86,7 @@ jobs:
       - name: Generate SARIF Report
         shell: bash
         run: |
+          echo "Scanning image: ${{ needs.docker.outputs.image_url }}"
           trivy image \
             --format sarif \
             --output trivy-results.sarif \

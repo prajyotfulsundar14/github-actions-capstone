@@ -79,11 +79,12 @@ jobs:
         id: meta
         shell: bash
         run: |
-          if [ -n "${{ secrets.docker_username }}" ]; then
-            IMAGE="${{ secrets.docker_username }}/${{ inputs.image_name }}"
-          else
-            IMAGE="${{ inputs.image_name }}"
+          DOCKER_USER="${{ secrets.docker_username }}"
+          if [ -z "$DOCKER_USER" ]; then
+            DOCKER_USER="devopsprajyot"
           fi
+
+          IMAGE="${DOCKER_USER}/${{ inputs.image_name }}"
           IMAGE_URL="${IMAGE}:${{ inputs.tag }}"
 
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
@@ -109,6 +110,7 @@ jobs:
         with:
           context: .
           push: ${{ steps.check-push.outputs.should_push == 'true' }}
+          load: ${{ steps.check-push.outputs.should_push != 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
