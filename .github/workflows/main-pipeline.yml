@@ -52,7 +52,7 @@ jobs:
       image_name: github-actions-capstone
       tag: latest
       extra_tags: sha-${{ needs.prep.outputs.short_sha }}
-      push: true
+      push: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_TOKEN != '' }}
 
     secrets:
       docker_username: ${{ secrets.DOCKER_USERNAME }}
