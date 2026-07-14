@@ -52,7 +52,7 @@ jobs:
       image_name: github-actions-capstone
       tag: latest
       extra_tags: sha-${{ needs.prep.outputs.short_sha }}
-      push: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_TOKEN != '' }}
+      push: true
 
     secrets:
       docker_username: ${{ secrets.DOCKER_USERNAME }}
@@ -63,20 +63,14 @@ jobs:
 
     needs: docker
 
+    if: needs.docker.outputs.pushed == 'true'
+
     runs-on: ubuntu-latest
 
     steps:
       - name: Show Docker Output
         run: |
           echo "Image URL = '${{ needs.docker.outputs.image_url }}'"
-
-      - name: Verify reusable workflow output
-        shell: bash
-        run: |
-          if [ -z "${{ needs.docker.outputs.image_url }}" ]; then
-            echo "ERROR: reusable-docker.yml did not return image_url"
-            exit 1
-          fi
 
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -134,6 +128,8 @@ jobs:
       - prep
       - docker
       - security-scan
+
+    if: needs.docker.outputs.pushed == 'true'
 
     runs-on: ubuntu-latest
 

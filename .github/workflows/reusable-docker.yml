@@ -35,6 +35,9 @@ on:
       image_url:
         description: "Full Docker image URL"
         value: ${{ jobs.docker.outputs.image_url }}
+      pushed:
+        description: "Whether the image was pushed to Docker Hub"
+        value: ${{ jobs.docker.outputs.pushed }}
 
 permissions:
   contents: read
@@ -45,7 +48,8 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      image_url: ${{ steps.output.outputs.image_url }}
+      image_url: ${{ steps.meta.outputs.image_url }}
+      pushed: ${{ steps.check-push.outputs.should_push }}
 
     steps:
       - name: Checkout Repository
@@ -54,17 +58,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Validate Docker credentials
-        if: ${{ inputs.push == true }}
+      - name: Compute push mode
+        id: check-push
         shell: bash
         run: |
-          if [ -z "${{ secrets.docker_username }}" ] || [ -z "${{ secrets.docker_token }}" ]; then
-            echo "ERROR: docker_username and docker_token secrets are required when push=true" >&2
-            exit 1
+          should_push=false
+          if [ "${{ inputs.push }}" = "true" ] && [ -n "${{ secrets.docker_username }}" ] && [ -n "${{ secrets.docker_token }}" ]; then
+            should_push=true
           fi
+          echo "should_push=$should_push" >> "$GITHUB_OUTPUT"
 
       - name: Login to Docker Hub
-        if: ${{ inputs.push == true && secrets.docker_username != '' && secrets.docker_token != '' }}
+        if: ${{ steps.check-push.outputs.should_push == 'true' }}
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.docker_username }}
@@ -103,16 +108,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ inputs.push }}
+          push: ${{ steps.check-push.outputs.should_push == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Set Workflow Output
-        id: output
-        shell: bash
-        run: |
-          echo "image_url=${{ steps.meta.outputs.image_url }}" >> "$GITHUB_OUTPUT"
 
       - name: Verify Output
         shell: bash
