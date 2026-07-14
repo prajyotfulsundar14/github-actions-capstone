@@ -119,15 +119,7 @@ jobs:
         id: output
         shell: bash
         run: |
-          DOCKER_USER="${{ secrets.docker_username }}"
-          if [ -z "$DOCKER_USER" ]; then
-            DOCKER_USER="devopsprajyot"
-          fi
-
-          IMAGE="${DOCKER_USER}/${{ inputs.image_name }}"
-          IMAGE_URL="${IMAGE}:${{ inputs.tag }}"
-
-          echo "image_url=$IMAGE_URL" >> "$GITHUB_OUTPUT"
+          echo "image_url=${{ steps.meta.outputs.image_url }}" >> "$GITHUB_OUTPUT"
           echo "pushed=${{ steps.check-push.outputs.should_push }}" >> "$GITHUB_OUTPUT"
 
       - name: Verify Output
