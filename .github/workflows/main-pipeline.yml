@@ -13,6 +13,10 @@ concurrency:
   group: main-pipeline
   cancel-in-progress: false
 
+env:
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/github-actions-capstone
+  IMAGE_TAG: latest
+
 jobs:
   prep:
     name: 0. Prepare Metadata
@@ -60,20 +64,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Show Docker Output
-        run: |
-          echo "Image URL:"
-          echo "${{ needs.docker.outputs.image_url }}"
-
-      - name: Validate Docker Output
-        run: |
-          if [ -z "${{ needs.docker.outputs.image_url }}" ]; then
-            echo "Docker image output is empty."
-            exit 1
-          fi
-
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Trivy
         run: |
@@ -83,7 +74,12 @@ jobs:
           sudo sh -s -- -b /usr/local/bin
           trivy --version
 
-      - name: Generate SARIF Report
+      - name: Show Image
+        run: |
+          echo "Scanning image:"
+          echo "${IMAGE_NAME}:${IMAGE_TAG}"
+
+      - name: Generate SARIF
         run: |
           trivy image \
             --scanners vuln \
@@ -91,29 +87,27 @@ jobs:
             --output trivy-results.sarif \
             --severity HIGH,CRITICAL \
             --ignore-unfixed \
-            --timeout 10m \
             --exit-code 0 \
-            "${{ needs.docker.outputs.image_url }}"
+            "${IMAGE_NAME}:${IMAGE_TAG}"
 
       - name: Upload SARIF
-        if: always()
         uses: github/codeql-action/upload-sarif@v4
+        if: always()
         with:
           sarif_file: trivy-results.sarif
 
-      - name: Fail on Critical Vulnerabilities
+      - name: Fail on Critical CVEs
         run: |
           trivy image \
             --scanners vuln \
             --severity CRITICAL \
             --ignore-unfixed \
-            --timeout 10m \
             --exit-code 1 \
-            "${{ needs.docker.outputs.image_url }}"
+            "${IMAGE_NAME}:${IMAGE_TAG}"
 
-      - name: Upload Trivy Report
-        if: always()
+      - name: Upload Report
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: trivy-report
           path: trivy-results.sarif
@@ -133,8 +127,7 @@ jobs:
     steps:
       - name: Deploy
         run: |
-          echo "Deploying image:"
-          echo "${{ needs.docker.outputs.image_url }}"
+          echo "Deploying ${IMAGE_NAME}:${IMAGE_TAG}"
 
       - name: Deployment Summary
         run: |
@@ -143,7 +136,7 @@ jobs:
             echo ""
             echo "| Item | Value |"
             echo "|------|-------|"
-            echo "| Image | ${{ needs.docker.outputs.image_url }} |"
+            echo "| Image | ${IMAGE_NAME}:${IMAGE_TAG} |"
             echo "| Environment | production |"
             echo "| Commit | ${{ github.sha }} |"
             echo "| Short SHA | ${{ needs.prep.outputs.short_sha }} |"
