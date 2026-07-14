@@ -28,13 +28,12 @@ on:
     secrets:
       docker_username:
         required: true
-
       docker_token:
         required: true
 
     outputs:
       image_url:
-        description: "Docker image URL"
+        description: "Full Docker image URL"
         value: ${{ jobs.docker.outputs.image_url }}
 
 permissions:
@@ -52,7 +51,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Docker Buildx
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
@@ -62,17 +61,19 @@ jobs:
           username: ${{ secrets.docker_username }}
           password: ${{ secrets.docker_token }}
 
-      - name: Generate Docker Tags
+      - name: Generate Docker Metadata
         id: meta
         shell: bash
         run: |
-          IMAGE=${{ secrets.docker_username }}/${{ inputs.image_name }}
+          IMAGE="${{ secrets.docker_username }}/${{ inputs.image_name }}"
+          IMAGE_URL="${IMAGE}:${{ inputs.tag }}"
 
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "image_url=$IMAGE_URL" >> "$GITHUB_OUTPUT"
 
           {
             echo "tags<<EOF"
-            echo "$IMAGE:${{ inputs.tag }}"
+            echo "$IMAGE_URL"
 
             if [ -n "${{ inputs.extra_tags }}" ]; then
               IFS=',' read -ra TAGS <<< "${{ inputs.extra_tags }}"
@@ -82,10 +83,10 @@ jobs:
             fi
 
             echo "EOF"
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build and Push Docker Image
-        id: docker
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -96,16 +97,24 @@ jobs:
 
       - name: Set Workflow Output
         id: output
+        shell: bash
         run: |
-          echo "image_url=${{ steps.meta.outputs.image }}:${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          echo "image_url=${{ steps.meta.outputs.image_url }}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Output
+        shell: bash
+        run: |
+          echo "Returned image_url:"
+          echo "${{ steps.meta.outputs.image_url }}"
 
       - name: Workflow Summary
+        shell: bash
         run: |
           {
             echo "## 🐳 Docker Build Summary"
             echo ""
             echo "- Image: ${{ steps.meta.outputs.image }}"
-            echo "- Primary Tag: ${{ inputs.tag }}"
+            echo "- Image URL: ${{ steps.meta.outputs.image_url }}"
             echo "- Push: ${{ inputs.push }}"
-            echo "- Digest: ${{ steps.docker.outputs.digest }}"
-          } >> $GITHUB_STEP_SUMMARY
+            echo "- Digest: ${{ steps.build.outputs.digest }}"
+          } >> "$GITHUB_STEP_SUMMARY"
