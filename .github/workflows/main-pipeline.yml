@@ -22,24 +22,20 @@ jobs:
       short_sha: ${{ steps.sha.outputs.short_sha }}
 
     steps:
-      - name: Generate short SHA
+      - name: Generate Short SHA
         id: sha
-        shell: bash
         run: |
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
   build-test:
     name: 1. Build & Test
-
     uses: ./.github/workflows/reusable-build-test.yml
-
     with:
       node_version: "20"
       run_tests: true
 
   docker:
     name: 2. Docker Build & Push
-
     needs:
       - prep
       - build-test
@@ -60,52 +56,55 @@ jobs:
 
   security-scan:
     name: 3. DevSecOps - Trivy Scan
-
     needs: docker
-
     runs-on: ubuntu-latest
 
     steps:
       - name: Show Docker Output
         run: |
-          echo "Image URL = '${{ needs.docker.outputs.image_url }}'"
+          echo "Image URL:"
+          echo "${{ needs.docker.outputs.image_url }}"
+
+      - name: Validate Docker Output
+        run: |
+          if [ -z "${{ needs.docker.outputs.image_url }}" ]; then
+            echo "Docker image output is empty."
+            exit 1
+          fi
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Install Trivy
-        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y wget
           wget -qO- https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | \
-            sudo sh -s -- -b /usr/local/bin
-
+          sudo sh -s -- -b /usr/local/bin
           trivy --version
 
       - name: Generate SARIF Report
-        shell: bash
         run: |
-          echo "Scanning image: ${{ needs.docker.outputs.image_url }}"
           trivy image \
+            --scanners vuln \
             --format sarif \
             --output trivy-results.sarif \
-            --severity CRITICAL,HIGH \
+            --severity HIGH,CRITICAL \
             --ignore-unfixed \
             --timeout 10m \
             --exit-code 0 \
             "${{ needs.docker.outputs.image_url }}"
 
       - name: Upload SARIF
-        if: hashFiles('trivy-results.sarif') != ''
+        if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
 
       - name: Fail on Critical Vulnerabilities
-        shell: bash
         run: |
           trivy image \
+            --scanners vuln \
             --severity CRITICAL \
             --ignore-unfixed \
             --timeout 10m \
@@ -113,12 +112,11 @@ jobs:
             "${{ needs.docker.outputs.image_url }}"
 
       - name: Upload Trivy Report
-        if: hashFiles('trivy-results.sarif') != ''
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-scan-report
+          name: trivy-report
           path: trivy-results.sarif
-          retention-days: 30
 
   deploy:
     name: 4. Deploy to Production
@@ -128,18 +126,18 @@ jobs:
       - docker
       - security-scan
 
-    if: needs.docker.outputs.pushed == 'true'
-
     runs-on: ubuntu-latest
 
     environment: production
 
     steps:
-      - name: Deployment Summary
-        shell: bash
+      - name: Deploy
         run: |
-          echo "Deploying image: ${{ needs.docker.outputs.image_url }}"
+          echo "Deploying image:"
+          echo "${{ needs.docker.outputs.image_url }}"
 
+      - name: Deployment Summary
+        run: |
           {
             echo "## 🚀 Deployment Summary"
             echo ""

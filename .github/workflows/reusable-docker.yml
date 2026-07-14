@@ -4,39 +4,40 @@ on:
   workflow_call:
     inputs:
       image_name:
-        description: "Docker image name"
+        description: Docker image name
         required: true
         type: string
 
       tag:
-        description: "Primary tag"
+        description: Primary image tag
         required: true
         type: string
 
       extra_tags:
-        description: "Comma separated extra tags"
+        description: Comma-separated extra tags
         required: false
         default: ""
         type: string
 
       push:
-        description: "Push image to Docker Hub"
+        description: Push image to Docker Hub
         required: false
         default: true
         type: boolean
 
     secrets:
       docker_username:
-        description: "Docker Hub username"
+        required: true
       docker_token:
-        description: "Docker Hub token"
+        required: true
 
     outputs:
       image_url:
-        description: "Full Docker image URL"
+        description: Full Docker image URL
         value: ${{ jobs.docker.outputs.image_url }}
+
       pushed:
-        description: "Whether the image was pushed to Docker Hub"
+        description: Whether image was pushed
         value: ${{ jobs.docker.outputs.pushed }}
 
 permissions:
@@ -44,12 +45,11 @@ permissions:
 
 jobs:
   docker:
-    name: Docker Build & Push
     runs-on: ubuntu-latest
 
     outputs:
       image_url: ${{ steps.output.outputs.image_url }}
-      pushed: ${{ steps.check-push.outputs.should_push }}
+      pushed: ${{ steps.output.outputs.pushed }}
 
     steps:
       - name: Checkout Repository
@@ -58,33 +58,28 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Compute push mode
-        id: check-push
+      - name: Determine Push Mode
+        id: pushmode
         shell: bash
         run: |
-          should_push=false
-          if [ "${{ inputs.push }}" = "true" ] && [ -n "${{ secrets.docker_username }}" ] && [ -n "${{ secrets.docker_token }}" ]; then
-            should_push=true
+          if [[ "${{ inputs.push }}" == "true" ]]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "should_push=$should_push" >> "$GITHUB_OUTPUT"
 
       - name: Login to Docker Hub
-        if: ${{ steps.check-push.outputs.should_push == 'true' }}
+        if: steps.pushmode.outputs.push == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.docker_username }}
           password: ${{ secrets.docker_token }}
 
-      - name: Generate Docker Metadata
+      - name: Generate Image Metadata
         id: meta
         shell: bash
         run: |
-          DOCKER_USER="${{ secrets.docker_username }}"
-          if [ -z "$DOCKER_USER" ]; then
-            DOCKER_USER="devopsprajyot"
-          fi
-
-          IMAGE="${DOCKER_USER}/${{ inputs.image_name }}"
+          IMAGE="${{ secrets.docker_username }}/${{ inputs.image_name }}"
           IMAGE_URL="${IMAGE}:${{ inputs.tag }}"
 
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
@@ -94,7 +89,7 @@ jobs:
             echo "tags<<EOF"
             echo "$IMAGE_URL"
 
-            if [ -n "${{ inputs.extra_tags }}" ]; then
+            if [[ -n "${{ inputs.extra_tags }}" ]]; then
               IFS=',' read -ra TAGS <<< "${{ inputs.extra_tags }}"
               for tag in "${TAGS[@]}"; do
                 echo "$IMAGE:$tag"
@@ -109,24 +104,24 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ steps.check-push.outputs.should_push == 'true' }}
-          load: ${{ steps.check-push.outputs.should_push != 'true' }}
+          push: ${{ steps.pushmode.outputs.push == 'true' }}
+          load: ${{ steps.pushmode.outputs.push != 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Set Workflow Output
+      - name: Export Workflow Outputs
         id: output
         shell: bash
         run: |
           echo "image_url=${{ steps.meta.outputs.image_url }}" >> "$GITHUB_OUTPUT"
-          echo "pushed=${{ steps.check-push.outputs.should_push }}" >> "$GITHUB_OUTPUT"
+          echo "pushed=${{ steps.pushmode.outputs.push }}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify Output
+      - name: Debug Outputs
         shell: bash
         run: |
-          echo "Returned image_url:"
-          echo "${{ steps.output.outputs.image_url }}"
+          echo "Image URL: ${{ steps.output.outputs.image_url }}"
+          echo "Pushed: ${{ steps.output.outputs.pushed }}"
 
       - name: Workflow Summary
         shell: bash
@@ -134,8 +129,10 @@ jobs:
           {
             echo "## 🐳 Docker Build Summary"
             echo ""
-            echo "- Image: ${{ steps.meta.outputs.image }}"
-            echo "- Image URL: ${{ steps.meta.outputs.image_url }}"
-            echo "- Push: ${{ inputs.push }}"
-            echo "- Digest: ${{ steps.build.outputs.digest }}"
+            echo "| Item | Value |"
+            echo "|------|-------|"
+            echo "| Image | ${{ steps.meta.outputs.image }} |"
+            echo "| Image URL | ${{ steps.meta.outputs.image_url }} |"
+            echo "| Push | ${{ steps.pushmode.outputs.push }} |"
+            echo "| Digest | ${{ steps.build.outputs.digest }} |"
           } >> "$GITHUB_STEP_SUMMARY"
