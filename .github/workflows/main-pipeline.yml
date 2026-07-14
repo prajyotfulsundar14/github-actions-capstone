@@ -2,8 +2,7 @@ name: Main CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
@@ -14,100 +13,102 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prep:
+    name: 0. Prepare Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+    steps:
+      - name: Generate short SHA
+        id: sha
+        run: echo "short_sha=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
   build-test:
     name: 1. Build & Test
     uses: ./.github/workflows/reusable-build-test.yml
     with:
-      node_version: "20"
+      node_version: "20.x"
       run_tests: true
 
   docker:
     name: 2. Docker Build & Push
-    needs: build-test
-
+    needs: [prep, build-test]
     if: needs.build-test.outputs.test_result == 'passed'
-
     uses: ./.github/workflows/reusable-docker.yml
-
     with:
-      image_name: github-actions-capstone
-      tag: latest
-      extra_tags: sha-${{ github.sha }}
+      image_name: "github-actions-capstone"
+      tag: "latest"
+      extra_tags: "sha-${{ needs.prep.outputs.short_sha }}"
       push: true
-
     secrets:
       docker_username: ${{ secrets.DOCKER_USERNAME }}
       docker_token: ${{ secrets.DOCKER_TOKEN }}
 
   security-scan:
-    name: 3. DevSecOps - Trivy Scan
-
+    name: 3. DevSecOps - Trivy Vulnerability Scan
     needs: docker
-
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Scan Docker image (SARIF)
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          image-ref: ${{ needs.docker.outputs.image_url }}
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-          exit-code: "0"
+      # Trivy CLI is installed directly with a pinned version rather than via
+      # the aquasecurity/trivy-action wrapper. The wrapper action's tags have
+      # been unstable (a pinned tag can silently resolve to a different
+      # release, and its binary-download step has been flaky). Installing
+      # the CLI directly is more reliable and auditable for an enterprise
+      # pipeline.
+      - name: Install Trivy (pinned version)
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.58.1
+          trivy --version
 
-      - name: Upload SARIF to GitHub Security
+      - name: Run Trivy scan (SARIF report, non-blocking)
+        run: |
+          trivy image \
+            --format sarif \
+            --output trivy-results.sarif \
+            --severity CRITICAL,HIGH \
+            --exit-code 0 \
+            --timeout 10m \
+            "${{ needs.docker.outputs.image_url }}"
+
+      - name: Upload Trivy SARIF report to code scanning
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: trivy-results.sarif
+          sarif_file: "trivy-results.sarif"
 
-      - name: Fail on Critical Vulnerabilities
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          image-ref: ${{ needs.docker.outputs.image_url }}
-          format: table
-          severity: CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
+      - name: Fail pipeline on CRITICAL CVEs
+        run: |
+          trivy image \
+            --format table \
+            --severity CRITICAL \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --timeout 10m \
+            "${{ needs.docker.outputs.image_url }}"
 
-      - name: Upload Trivy Report
+      - name: Upload scan report artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-report
+          name: trivy-scan-report
           path: trivy-results.sarif
           retention-days: 30
 
   deploy:
     name: 4. Deploy to Production
-
-    needs:
-      - docker
-      - security-scan
-
+    needs: [prep, docker, security-scan]
     runs-on: ubuntu-latest
-
-    environment:
-      name: production
-
+    environment: production
     steps:
-      - name: Deployment Summary
+      - name: Deploy
         run: |
-          echo "Deploying image:"
-          echo "${{ needs.docker.outputs.image_url }}"
-
-          {
-            echo "## 🚀 Deployment Summary"
-            echo ""
-            echo "| Item | Value |"
-            echo "|------|-------|"
-            echo "| Image | ${{ needs.docker.outputs.image_url }} |"
-            echo "| Environment | production |"
-            echo "| Commit | ${{ github.sha }} |"
-            echo "| Actor | ${{ github.actor }} |"
-            echo "| Status | Success ✅ |"
-          } >> $GITHUB_STEP_SUMMARY
+          echo "Deploying image: ${{ needs.docker.outputs.image_url }} to production"
+          echo "### 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image: \`${{ needs.docker.outputs.image_url }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Environment: \`production\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.sha }}\` (short: \`${{ needs.prep.outputs.short_sha }}\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Triggered by: \`${{ github.actor }}\`" >> "$GITHUB_STEP_SUMMARY"
