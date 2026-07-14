@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      image_url: ${{ steps.meta.outputs.image_url }}
+      image_url: ${{ steps.output.outputs.image_url }}
       pushed: ${{ steps.check-push.outputs.should_push }}
 
     steps:
@@ -112,6 +112,13 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Set Workflow Output
+        id: output
+        shell: bash
+        run: |
+          echo "image_url=${{ steps.meta.outputs.image_url }}" >> "$GITHUB_OUTPUT"
+          echo "pushed=${{ steps.check-push.outputs.should_push }}" >> "$GITHUB_OUTPUT"
 
       - name: Verify Output
         shell: bash
