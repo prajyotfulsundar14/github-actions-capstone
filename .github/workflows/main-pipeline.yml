@@ -52,16 +52,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Trivy CLI is installed directly with a pinned version rather than via
-      # the aquasecurity/trivy-action wrapper. The wrapper action's tags have
-      # been unstable (a pinned tag can silently resolve to a different
-      # release, and its binary-download step has been flaky). Installing
-      # the CLI directly is more reliable and auditable for an enterprise
-      # pipeline.
+      # Trivy CLI is installed by downloading the official .deb package
+      # directly and installing with dpkg, rather than relying on
+      # contrib/install.sh (which has been flaky on GitHub-hosted runners)
+      # or the aquasecurity/trivy-action wrapper (whose tags have been
+      # unstable). This is the most reliable, fully pinned method.
       - name: Install Trivy (pinned version)
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin v0.58.1
+          set -euo pipefail
+          TRIVY_VERSION="0.72.0"
+          curl -sfL -o trivy.deb \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.deb"
+          sudo dpkg -i trivy.deb || sudo apt-get install -f -y
+          rm -f trivy.deb
           trivy --version
 
       - name: Run Trivy scan (SARIF report, non-blocking)
