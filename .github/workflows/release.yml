@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-test:
+    name: Build & Test
+    uses: ./.github/workflows/reusable-build-test.yml
+    with:
+      node_version: "20.x"
+      run_tests: true
+
+  docker:
+    name: Docker Build & Push (Release Tag)
+    needs: build-test
+    uses: ./.github/workflows/reusable-docker.yml
+    with:
+      image_name: "github-actions-capstone"
+      tag: "${{ github.ref_name }}"
+      extra_tags: "latest"
+      push: true
+    secrets:
+      docker_username: ${{ secrets.DOCKER_USERNAME }}
+      docker_token: ${{ secrets.DOCKER_TOKEN }}
+
+  github-release:
+    name: Create GitHub Release
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            echo "log<<EOF" >> "$GITHUB_OUTPUT"
+            git log "$PREV_TAG"..HEAD --pretty=format:"- %s (%h)" >> "$GITHUB_OUTPUT"
+            echo "" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          else
+            echo "log=Initial release" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## Changes
+            ${{ steps.changelog.outputs.log }}
+
+            ## Docker Image
+            `${{ needs.docker.outputs.image_url }}`
+          generate_release_notes: true

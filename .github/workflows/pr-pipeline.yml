@@ -1,34 +1,46 @@
 name: PR Pipeline
 
 on:
-
   pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
 
-    branches:
-      - main
+permissions:
+  contents: read
+  pull-requests: write
 
-    types:
-      - opened
-      - synchronize
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
-
-  build:
-
+  build-test:
+    name: Build & Test
     uses: ./.github/workflows/reusable-build-test.yml
-
     with:
-      node_version: "22"
+      node_version: "20.x"
       run_tests: true
 
   pr-comment:
-
-    needs: build
-
+    name: PR Summary Comment
+    needs: build-test
     runs-on: ubuntu-latest
-
     steps:
+      - name: Print PR check summary
+        run: |
+          echo "PR checks passed for branch: ${{ github.head_ref }}"
+          echo "### ✅ PR Checks Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: \`${{ github.head_ref }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Test result: \`${{ needs.build-test.outputs.test_result }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- No Docker image was built or pushed for this PR (by design)." >> "$GITHUB_STEP_SUMMARY"
 
-      - run: |
-          echo "PR checks passed"
-          echo "Branch : ${{ github.head_ref }}"
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `✅ **PR checks passed** for branch \`${{ github.head_ref }}\`\n\nTest result: \`${{ needs.build-test.outputs.test_result }}\`\n\nNo Docker image is built on PRs — that only happens on merge to \`main\`.`
+            })

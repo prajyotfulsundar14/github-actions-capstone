@@ -1,49 +1,78 @@
-name: Reusable Build Test
+name: Reusable - Build & Test
 
 on:
   workflow_call:
-
     inputs:
-
       node_version:
-
-        required: true
+        description: "Node.js version to use"
         type: string
-
+        default: "20.x"
       run_tests:
-
-        required: false
-        default: true
+        description: "Whether to run the test suite"
         type: boolean
-
+        default: true
     outputs:
-
       test_result:
-        value: ${{ jobs.build.outputs.test_result }}
+        description: "Result of the test run: passed or failed"
+        value: ${{ jobs.build-test.outputs.test_result }}
+
+permissions:
+  contents: read
 
 jobs:
-
-  build:
-
+  build-test:
+    name: Build & Test (Node ${{ inputs.node_version }})
     runs-on: ubuntu-latest
-
     outputs:
-      test_result: ${{ steps.result.outputs.result }}
+      test_result: ${{ steps.set-result.outputs.test_result }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js ${{ inputs.node_version }}
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node_version }}
+          cache: "npm"
 
-      - run: npm install
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
-      - name: Run Tests
-        if: inputs.run_tests
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Run tests
+        if: ${{ inputs.run_tests == true }}
+        id: run-tests
         run: npm test
 
-      - id: result
+      - name: Upload coverage report
+        if: ${{ inputs.run_tests == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-node${{ inputs.node_version }}
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Set test result output
+        id: set-result
+        if: always()
         run: |
-          echo "result=passed" >> $GITHUB_OUTPUT
+          if [ "${{ inputs.run_tests }}" != "true" ]; then
+            echo "test_result=skipped" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.run-tests.outcome }}" == "success" ]; then
+            echo "test_result=passed" >> "$GITHUB_OUTPUT"
+          else
+            echo "test_result=failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail job if tests failed
+        if: ${{ inputs.run_tests == true && steps.run-tests.outcome != 'success' }}
+        run: exit 1

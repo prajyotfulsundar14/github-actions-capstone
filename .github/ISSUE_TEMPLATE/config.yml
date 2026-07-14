@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Questions & Discussion
+    url: https://github.com/prajyotfulsundar14/github-actions-capstone/discussions
+    about: Ask questions or discuss ideas before opening an issue.

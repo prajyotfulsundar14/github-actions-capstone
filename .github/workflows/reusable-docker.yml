@@ -1,61 +1,84 @@
-name: Reusable Docker
+name: Reusable - Docker Build & Push
 
 on:
-
   workflow_call:
-
     inputs:
-
       image_name:
-
-        required: true
+        description: "Docker image name (without registry prefix), e.g. yourname/github-actions-capstone"
         type: string
-
+        required: true
       tag:
-
-        required: true
+        description: "Primary tag for the image, e.g. latest or sha-abc1234"
         type: string
-
+        required: true
+      extra_tags:
+        description: "Comma-separated list of additional tags"
+        type: string
+        default: ""
+      push:
+        description: "Whether to push the image (false = build only, useful for PR dry-runs)"
+        type: boolean
+        default: true
     secrets:
-
       docker_username:
         required: true
-
       docker_token:
         required: true
-
     outputs:
-
       image_url:
-        value: ${{ jobs.docker.outputs.image }}
+        description: "Full image reference that was built/pushed"
+        value: ${{ jobs.docker.outputs.image_url }}
+
+permissions:
+  contents: read
 
 jobs:
-
   docker:
-
+    name: Docker Build & Push
     runs-on: ubuntu-latest
-
     outputs:
-
-      image: ${{ steps.image.outputs.url }}
+      image_url: ${{ steps.set-output.outputs.image_url }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: Log in to Docker Hub
+        if: ${{ inputs.push == true }}
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.docker_username }}
           password: ${{ secrets.docker_token }}
 
-      - name: Build Image
+      - name: Build tag list
+        id: tags
         run: |
-          docker build -t ${{ secrets.docker_username }}/${{ inputs.image_name }}:${{ inputs.tag }} .
+          IMAGE="${{ secrets.docker_username }}/${{ inputs.image_name }}"
+          TAGS="${IMAGE}:${{ inputs.tag }}"
+          if [ -n "${{ inputs.extra_tags }}" ]; then
+            IFS=',' read -ra EXTRA <<< "${{ inputs.extra_tags }}"
+            for t in "${EXTRA[@]}"; do
+              TAGS="${TAGS},${IMAGE}:${t}"
+            done
+          fi
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
-      - name: Push Image
-        run: |
-          docker push ${{ secrets.docker_username }}/${{ inputs.image_name }}:${{ inputs.tag }}
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: production
+          push: ${{ inputs.push }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - id: image
+      - name: Set image_url output
+        id: set-output
         run: |
-          echo "url=${{ secrets.docker_username }}/${{ inputs.image_name }}:${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          echo "image_url=${{ steps.tags.outputs.image }}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
